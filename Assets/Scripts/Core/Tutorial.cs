@@ -26,6 +26,8 @@ namespace Nullroute.Core
         }
 
         public bool Active { get { return g.D != null && !g.D.tutorialDone; } }
+        public int StepCount { get { return steps.Count; } }
+        public int StepIndex { get { return g.D == null ? 0 : Math.Min(g.D.tutorialStep, steps.Count - 1); } }
 
         NodeData Training { get { return g.Node(g.D.trainingNodeId); } }
         string Ip { get { var t = Training; return t != null ? t.ip : "?"; } }
@@ -67,7 +69,7 @@ namespace Nullroute.Core
 
             S(() => "Only a password here. Real systems also run firewalls, proxies and monitors, and each needs\n" +
                     "the right tool at a high enough version.\n\n" +
-                    "Tools run in the background - watch the bars at the top of the screen. Out in the wild, any\n" +
+                    "Tools run in the background - watch the PROCESSES panel on the right. Out in the wild, any\n" +
                     "hostile action starts a " + Tx.R("TRACE") + ". If it reaches 100% while you're connected, you're caught.\n" +
                     "This server is for training, so it won't trace you.\n\n" +
                     "Launch your password cracker: " + Tx.W("crack"),

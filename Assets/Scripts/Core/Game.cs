@@ -26,6 +26,13 @@ namespace Nullroute.Core
         public double Trace { get; private set; }
         public readonly List<Proc> Procs = new List<Proc>();
 
+        /// <summary>Headline events for a graphical front end. Capped so headless runs never grow it.</summary>
+        public readonly Queue<Notice> Notices = new Queue<Notice>();
+        /// <summary>Bumped on every error line, so a front end can flash the prompt.</summary>
+        public int ErrorCount { get; private set; }
+        /// <summary>Procs that finished, with whether they succeeded, for a front end to animate.</summary>
+        public readonly Queue<Proc> Finished = new Queue<Proc>();
+
         readonly ISaveStore store;
         readonly Rng rng;
         readonly HashSet<string> used = new HashSet<string>();
@@ -55,7 +62,13 @@ namespace Nullroute.Core
         }
 
         void Warn(string s) { Print(Tx.R("[!] ") + Tx.Y(s)); }
-        void Err(string s) { Print(Tx.R(s)); }
+        void Err(string s) { ErrorCount++; Print(Tx.R(s)); }
+
+        public void Notify(NoticeKind kind, string title, string text = null)
+        {
+            Notices.Enqueue(new Notice { kind = kind, title = title, text = text });
+            while (Notices.Count > 24) Notices.Dequeue();
+        }
         void Ok(string s) { Print(Tx.G(s)); }
 
         public string Prompt
@@ -192,6 +205,8 @@ namespace Nullroute.Core
                 foreach (var p in finished)
                 {
                     Procs.Remove(p);
+                    Finished.Enqueue(p);
+                    while (Finished.Count > 24) Finished.Dequeue();
                     Complete(p);
                     if (Mode != Mode.Playing) return;
                 }
@@ -204,9 +219,9 @@ namespace Nullroute.Core
                 if (dur > 0)
                 {
                     Trace += dt / dur;
-                    if (Trace >= 0.5 && traceWarn < 1) { traceWarn = 1; Warn("Trace at 50%."); }
-                    if (Trace >= 0.75 && traceWarn < 2) { traceWarn = 2; Warn("Trace at 75%. Finish up."); }
-                    if (Trace >= 0.9 && traceWarn < 3) { traceWarn = 3; Print(Tx.R("[!!!] TRACE AT 90% - DISCONNECT NOW (`dc`)")); }
+                    if (Trace >= 0.5 && traceWarn < 1) { traceWarn = 1; Warn("Trace at 50%."); Notify(NoticeKind.Warn, "TRACE 50%", "Halfway there. Keep moving."); }
+                    if (Trace >= 0.75 && traceWarn < 2) { traceWarn = 2; Warn("Trace at 75%. Finish up."); Notify(NoticeKind.Danger, "TRACE 75%", "Finish up and wipe the logs."); }
+                    if (Trace >= 0.9 && traceWarn < 3) { traceWarn = 3; Print(Tx.R("[!!!] TRACE AT 90% - DISCONNECT NOW (`dc`)")); Notify(NoticeKind.Danger, "TRACE 90%", "DISCONNECT NOW - type dc"); }
                     if (Trace >= 1)
                     {
                         Caught("Active trace completed on " + Conn.name + " (" + Conn.ip + ").");
@@ -252,6 +267,7 @@ namespace Nullroute.Core
                 int loss = Math.Min(P.rep, Math.Max(2, m.rep / 2));
                 P.rep -= loss;
                 Warn("Contract #" + m.id + " expired. The client is unhappy: -" + loss + " rep.");
+                Notify(NoticeKind.Warn, "CONTRACT #" + m.id + " EXPIRED", "-" + loss + " rep");
                 Prune(m.nodeId);
             }
             RefillBoard();
@@ -361,6 +377,7 @@ namespace Nullroute.Core
             {
                 TraceActive = true;
                 Warn("Intrusion detected - " + n.name + " has started tracing you.");
+                Notify(NoticeKind.Danger, "INTRUSION DETECTED", n.name + " is tracing you");
             }
         }
 
@@ -375,6 +392,7 @@ namespace Nullroute.Core
             Trace = 0;
             if (verbose)
             {
+                Notify(NoticeKind.Info, "DISCONNECTED", n.ip + (aborted > 0 ? "  (" + aborted + " process(es) aborted)" : ""));
                 Print(Tx.D("Connection to ") + n.ip + Tx.D(" closed.") + (aborted > 0 ? Tx.Y(" " + aborted + " remote process(es) aborted.") : ""));
             }
 
@@ -397,6 +415,7 @@ namespace Nullroute.Core
                 inv.chance = Math.Max(inv.chance, chance);
             }
             Warn("You left " + evidence + " suspicious log entr" + (evidence == 1 ? "y" : "ies") + " on " + n.name + ".");
+            Notify(NoticeKind.Warn, "EVIDENCE LEFT BEHIND", n.name + ": forensics in " + Tx.Clock(inv.ends - D.time) + ", risk " + Tx.Pct(inv.chance));
             Print(Tx.Y("    Forensic trace begins in " + Tx.Clock(inv.ends - D.time) + " (risk " + Tx.Pct(inv.chance) +
                        "). Reconnect and `logwipe` to kill it."));
         }
@@ -409,6 +428,7 @@ namespace Nullroute.Core
             if (!evidence)
             {
                 Print(Tx.G("[+] Investigation at " + n.name + " closed: no evidence."));
+                Notify(NoticeKind.Good, "INVESTIGATION CLOSED", n.name + ": no evidence");
             }
             else if (rng.Chance(inv.chance))
             {
@@ -419,6 +439,7 @@ namespace Nullroute.Core
             {
                 foreach (var l in n.logs) if (l.byPlayer) l.suspicious = false;
                 Print(Tx.G("[+] Investigation at " + n.name + " went cold. You got lucky."));
+                Notify(NoticeKind.Good, "INVESTIGATION WENT COLD", n.name + ": you got lucky");
             }
             Prune(n.id);
         }
@@ -430,6 +451,7 @@ namespace Nullroute.Core
             Procs.Clear();
             Route.Clear();
             try { store.Delete(); } catch { }
+            Notify(NoticeKind.Danger, "GATEWAY SEIZED", how);
             Print();
             Print(Tx.R("################################################################"));
             Print(Tx.R("##                                                            ##"));
@@ -477,20 +499,24 @@ namespace Nullroute.Core
                 case ProcKind.FwBypass:
                     n.firewallDown = true;
                     Ok("[" + p.pid + "] Firewall bypassed.");
+                    Notify(NoticeKind.Good, "FIREWALL BYPASSED", n.name);
                     break;
                 case ProcKind.PxBypass:
                     n.proxyDown = true;
                     Ok("[" + p.pid + "] Proxy bypassed.");
+                    Notify(NoticeKind.Good, "PROXY BYPASSED", n.name);
                     break;
                 case ProcKind.MonBypass:
                     n.monitorDown = true;
                     Ok("[" + p.pid + "] Monitor blinded - trace slowed.");
+                    Notify(NoticeKind.Good, "MONITOR BLINDED", "Trace slowed");
                     break;
                 case ProcKind.Crack:
                     n.passwordKnown = true;
                     if (n.breachedAt <= 0) { n.breachedAt = D.time + 0.001; P.nodesBreached++; }
                     Ok("[" + p.pid + "] Password cracked: " + Tx.W(Tx.Safe(n.adminPassword ?? "hunter2")));
                     Ok("    ACCESS GRANTED - logged in as admin. Try `ls`" + (n.records.Count > 0 ? " or `db`." : "."));
+                    Notify(NoticeKind.Good, "ACCESS GRANTED", n.name + " - logged in as admin");
                     break;
                 case ProcKind.LogWipe:
                 {
@@ -498,6 +524,7 @@ namespace Nullroute.Core
                     Ok("[" + p.pid + "] Logs scrubbed: " + removed + " entr" + (removed == 1 ? "y" : "ies") + " removed.");
                     int cancelled = D.investigations.RemoveAll(i => i.nodeId == n.id);
                     if (cancelled > 0) Ok("    The investigation at " + n.name + " has nothing to go on. It's dead.");
+                    Notify(NoticeKind.Good, "LOGS SCRUBBED", removed + " entr" + (removed == 1 ? "y" : "ies") + " removed" + (cancelled > 0 ? ", investigation dead" : ""));
                     break;
                 }
                 case ProcKind.Download:
@@ -506,6 +533,7 @@ namespace Nullroute.Core
                     if (f == null) { Err("[" + p.pid + "] Download failed: file vanished."); break; }
                     P.files.RemoveAll(x => x.name == f.name);
                     P.files.Add(new LocalFile { name = f.name, size = f.size, encryption = f.encryption, fromNode = n.id });
+                    Notify(NoticeKind.Good, "DOWNLOAD COMPLETE", f.name + (f.encryption > 0 ? "  (encrypted)" : ""));
                     Ok("[" + p.pid + "] Downloaded " + f.name + " (" + f.size + " MB)" + (f.encryption > 0 ? Tx.Y(" - encrypted, lvl " + f.encryption) : "") + ".");
                     break;
                 }
@@ -517,12 +545,13 @@ namespace Nullroute.Core
                     n.files.Add(new FileData { name = lf.name, size = lf.size, encryption = lf.encryption });
                     P.files.Remove(lf);
                     Ok("[" + p.pid + "] Uploaded " + lf.name + " to " + n.ip + ".");
+                    Notify(NoticeKind.Good, "UPLOAD COMPLETE", lf.name);
                     break;
                 }
                 case ProcKind.Delete:
                 {
                     int r = n.files.RemoveAll(x => x.name == p.arg);
-                    if (r > 0) Ok("[" + p.pid + "] Deleted " + p.arg + ".");
+                    if (r > 0) { Ok("[" + p.pid + "] Deleted " + p.arg + "."); Notify(NoticeKind.Good, "FILE DELETED", p.arg); }
                     else Err("[" + p.pid + "] Delete failed: file not found.");
                     break;
                 }
@@ -532,6 +561,7 @@ namespace Nullroute.Core
                     var fld = rec?.fields.FirstOrDefault(x => x.key == p.arg2);
                     if (fld == null) { Err("[" + p.pid + "] Edit failed: record changed."); break; }
                     fld.value = p.arg3;
+                    Notify(NoticeKind.Good, "RECORD UPDATED", rec.id + "." + fld.key + " = " + Tx.Safe(fld.value));
                     Ok("[" + p.pid + "] Record " + rec.id + " updated: " + fld.key + " = " + Tx.Safe(fld.value));
                     break;
                 }
@@ -541,6 +571,7 @@ namespace Nullroute.Core
                     if (lf == null) { Err("[" + p.pid + "] Decrypt failed: file missing."); break; }
                     lf.encryption = 0;
                     Ok("[" + p.pid + "] Decrypted " + lf.name + ".");
+                    Notify(NoticeKind.Good, "DECRYPTED", lf.name);
                     break;
                 }
             }

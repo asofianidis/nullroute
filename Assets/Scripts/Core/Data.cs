@@ -174,6 +174,16 @@ namespace Nullroute.Core
         void Delete();
     }
 
+    public enum NoticeKind { Info, Good, Warn, Danger, Money, Rank }
+
+    /// <summary>A short headline for the front end to pop up (toast, flash). Not persisted.</summary>
+    public struct Notice
+    {
+        public NoticeKind kind;
+        public string title;
+        public string text;
+    }
+
     public enum ProcKind { Crack, FwBypass, PxBypass, MonBypass, LogWipe, Download, Upload, Delete, DbEdit, Decrypt }
 
     /// <summary>A running background task (not persisted).</summary>

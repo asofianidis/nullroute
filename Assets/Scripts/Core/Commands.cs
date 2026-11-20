@@ -236,6 +236,7 @@ namespace Nullroute.Core
                 P.files.Add(new LocalFile { name = m.fileName, size = m.fileSize, missionId = m.id });
 
             Ok("Contract #" + m.id + " accepted from " + Tx.W(m.client) + ".");
+            Notify(NoticeKind.Info, "CONTRACT #" + m.id + " ACCEPTED", "Target " + n.ip);
             Print("  " + WorldGen.Describe(m, n));
             Print("  Target: " + Tx.Y(n.ip) + Tx.D("  (" + n.name + ")"));
             if (m.type == MissionType.Plant) Print(Tx.D("  The client sent ") + m.fileName + Tx.D(" to your local storage."));
@@ -258,7 +259,7 @@ namespace Nullroute.Core
             }
         }
 
-        bool MissionReady(MissionData m, out string why)
+        public bool MissionReady(MissionData m, out string why)
         {
             var n = Node(m.nodeId);
             why = "";
@@ -309,6 +310,7 @@ namespace Nullroute.Core
             if (m.tutorial) D.tutorialMissionDone = true;
 
             Ok("Contract #" + m.id + " complete. " + Tx.W(m.client) + " transferred " + Tx.Y(Tx.Money(m.payout)) + Tx.G(". +" + m.rep + " rep."));
+            Notify(NoticeKind.Money, "+" + Tx.Money(m.payout), "Contract #" + m.id + " complete, +" + m.rep + " rep");
             int after = Rank;
             if (after > before) RankUp(before, after);
             Prune(m.nodeId);
@@ -319,6 +321,7 @@ namespace Nullroute.Core
         void RankUp(int before, int after)
         {
             Print();
+            Notify(NoticeKind.Rank, "RANK UP", Balance.RankTitle(after));
             Print(Tx.M(">>> RANK UP: you are now " + Balance.RankTitle(after).ToUpperInvariant() + " <<<"));
             Print(Tx.M("    Tool versions up to v" + Balance.MaxToolVersion(after) + " unlocked. Harder, better-paying contracts are on the board."));
             foreach (var t in Balance.Tools.Where(t => t.unlockRank > before && t.unlockRank <= after))
@@ -343,7 +346,7 @@ namespace Nullroute.Core
 
         // ------------------------------------------------------------------ workstation
 
-        int HwLevel(HwId id)
+        public int HwLevel(HwId id)
         {
             switch (id)
             {
@@ -443,6 +446,7 @@ namespace Nullroute.Core
             if (tl == null) P.tools.Add(tl = new ToolLevel { id = t.id });
             tl.version = v + 1;
             Ok("Installed " + t.name + " v" + tl.version + " for " + Tx.Money(price) + ".");
+            Notify(NoticeKind.Good, "INSTALLED", t.name + " v" + tl.version);
             Save();
         }
 
@@ -464,6 +468,7 @@ namespace Nullroute.Core
                 default: P.cloak++; break;
             }
             Ok(h.name + " upgraded to L" + (l + 1) + ": " + HwEffect(h.id, l + 1) + ".");
+            Notify(NoticeKind.Good, h.name.ToUpperInvariant() + " L" + (l + 1), HwEffect(h.id, l + 1));
             Save();
         }
 
@@ -578,6 +583,7 @@ namespace Nullroute.Core
             path += Tx.D(" -> ") + Tx.W(n.ip);
             Print(Tx.D("Routing: ") + path);
             Ok("Connected to " + n.name + ".");
+            Notify(NoticeKind.Info, "CONNECTED", n.name + "  " + n.ip);
             if (n.isPublic) Print(Tx.D("Public relay - nothing to steal here."));
             else if (n.passwordKnown) Ok("Stored credentials accepted. Logged in as admin.");
             else Print(Tx.D("Login required. `probe` to inspect its defenses."));
